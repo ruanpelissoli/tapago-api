@@ -1,0 +1,49 @@
+# migrations
+
+## Purpose
+
+Numbered, forward-only SQL files describing the database schema. There is no
+migration runner yet — each file is applied by hand:
+
+```bash
+psql "$DATABASE_URL" -f migrations/00N_name.sql
+```
+
+## Key decisions
+
+- **Every statement is idempotent** (`IF NOT EXISTS`, `ADD COLUMN IF NOT
+  EXISTS`). Without a runner tracking which files have been applied, re-running
+  one must be harmless.
+- **No down migrations.** Rolling a schema backwards in production loses data;
+  the fix for a bad migration is another migration.
+- **No ORM, no generated schema.** These files are the source of truth and the
+  queries in `internal/` are written against them by hand.
+
+## Business logic
+
+- `001_create_users.sql` — the `users` table. `email` is `UNIQUE`, and
+  handlers normalise to lower case before writing, which is what makes that
+  index behave case-insensitively without the `citext` extension.
+- `002_add_social_ids.sql` — nullable `google_id` / `apple_id` with **partial
+  unique indexes**, so one provider account cannot log in as two users while
+  the many rows with no link stay valid. It also drops `NOT NULL` from
+  `password_hash`: an account created purely through social sign-in has no
+  password, and a sentinel `''` would invite code that treats it as
+  verifiable. Callers must handle NULL — see `internal/handler/auth`.
+
+## Dependencies
+
+`pgcrypto` (for `gen_random_uuid()` on PostgreSQL < 13; a no-op from 13 on).
+`internal/model` and `internal/handler/auth` write the queries that depend on
+these columns; changing a column name breaks them at query time, not at
+compile time.
+
+## Gotchas
+
+- **Applying a file is a manual step.** Code merged before its migration runs
+  fails with an "column does not exist" error at request time, not at startup.
+- `ON CONFLICT (email)` in `model.UpsertSocialUser` depends on the unique
+  constraint from 001. Dropping it silently turns the upsert into a duplicate
+  insert.
+- Adding a `NOT NULL` column to `users` without a default will break the
+  social upsert, which only supplies email, name and one provider id.

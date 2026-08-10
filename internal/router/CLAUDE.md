@@ -29,8 +29,9 @@ The one place that maps URLs to handlers and defines the middleware chain.
   `RequestLogger` → `Recoverer`. RequestID must precede the logger for the
   id to appear in logs; Recoverer sits innermost so a panic becomes a logged
   500 instead of a dropped connection.
-- Public routes: `GET /health`, `POST /auth/register`, `POST /auth/login` —
-  the last two are how a client obtains a token, so they cannot require one.
+- Public routes: `GET /health`, `POST /auth/register`, `POST /auth/login`,
+  `POST /auth/google`, `POST /auth/apple` — the `/auth/*` ones are how a
+  client obtains a token, so they cannot require one.
 - Protected routes (inside `RequireAuth`): `GET /me`. Add future
   authenticated routes to that group, not above it.
 - `GET /health` is registered without any dependency on `Deps.DB` — see
@@ -49,6 +50,9 @@ Imported by `cmd/api`.
   identical whether or not auth is configured. Do not "fix" this by skipping
   the route registration; a route that disappears based on config is far
   harder to debug than one that returns 401.
+- **`Deps.Social` members may be nil too**, for the same reason: a provider
+  with no client id configured keeps its route and answers 503. Do not gate
+  route registration on configuration.
 - `Deps.DB` may be nil in tests. Routes that dereference it must be reachable
   only from tests that supply one — the auth wiring tests deliberately stay on
   paths that reject before any query runs.

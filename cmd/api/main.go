@@ -13,7 +13,9 @@ import (
 
 	"github.com/tapago/tapago-api/internal/config"
 	"github.com/tapago/tapago-api/internal/db"
+	authhandler "github.com/tapago/tapago-api/internal/handler/auth"
 	"github.com/tapago/tapago-api/internal/router"
+	"github.com/tapago/tapago-api/internal/social"
 	"github.com/tapago/tapago-api/internal/token"
 )
 
@@ -73,7 +75,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
-		Handler:           router.New(router.Deps{DB: pool, Tokens: tokens}),
+		Handler:           router.New(router.Deps{DB: pool, Tokens: tokens, Social: socialVerifiers(cfg)}),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
@@ -111,4 +113,31 @@ func run() error {
 
 	slog.Info("server stopped cleanly")
 	return nil
+}
+
+// socialVerifiers builds the Google and Apple ID-token verifiers from the
+// configured client ids.
+//
+// A provider with no client id configured is left nil rather than failing
+// startup: social sign-in is optional, and an environment that does not use
+// it (a local dev box, a test stack) must still be able to boot. The route
+// stays mounted and answers 503, so the gap is visible in the logs and to the
+// client instead of silently accepting tokens minted for another app —
+// social.NewGoogle/NewApple refuse to build without an audience at all.
+func socialVerifiers(cfg config.Config) authhandler.SocialVerifiers {
+	var verifiers authhandler.SocialVerifiers
+
+	if google, err := social.NewGoogle(cfg.GoogleClientIDs); err != nil {
+		slog.Warn("google sign-in disabled", "reason", err)
+	} else {
+		verifiers.Google = google
+	}
+
+	if apple, err := social.NewApple(cfg.AppleClientIDs); err != nil {
+		slog.Warn("apple sign-in disabled", "reason", err)
+	} else {
+		verifiers.Apple = apple
+	}
+
+	return verifiers
 }
