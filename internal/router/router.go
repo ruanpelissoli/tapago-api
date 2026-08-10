@@ -13,8 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tapago/tapago-api/internal/handler"
+	authhandler "github.com/tapago/tapago-api/internal/handler/auth"
 	"github.com/tapago/tapago-api/internal/handler/health"
 	"github.com/tapago/tapago-api/internal/middleware"
+	"github.com/tapago/tapago-api/internal/token"
 )
 
 // Deps carries the dependencies handlers need. Passing them explicitly keeps
@@ -23,6 +25,10 @@ type Deps struct {
 	// DB is the shared connection pool. It may be nil in tests that only
 	// exercise routes which do not touch the database.
 	DB *pgxpool.Pool
+	// Tokens signs and verifies access tokens. A nil Issuer fails closed —
+	// verification rejects every token — so the route surface stays the same
+	// whether or not auth is configured. cmd/api always supplies one.
+	Tokens *token.Issuer
 }
 
 // New builds the application router with all routes and middleware attached.
@@ -46,8 +52,22 @@ func New(deps Deps) http.Handler {
 
 	r.Get("/health", health.Check)
 
-	// Future feature routes mount here, e.g.:
-	//   r.Route("/v1/auth", func(r chi.Router) { ... })
+	auth := authhandler.NewHandler(deps.DB, deps.Tokens)
+
+	// Public: these are how a client obtains a token in the first place, so
+	// they must sit outside RequireAuth.
+	r.Post("/auth/register", auth.Register)
+	r.Post("/auth/login", auth.Login)
+
+	// Protected: everything inside this group requires a valid bearer token.
+	// Using a chi.Group rather than a global middleware keeps /health and the
+	// two routes above reachable without one — an allow-list of public paths
+	// inside a global middleware is the kind of thing that grows a hole.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth(deps.Tokens))
+
+		r.Get("/me", auth.Me)
+	})
 
 	return r
 }

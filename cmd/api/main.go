@@ -14,6 +14,7 @@ import (
 	"github.com/tapago/tapago-api/internal/config"
 	"github.com/tapago/tapago-api/internal/db"
 	"github.com/tapago/tapago-api/internal/router"
+	"github.com/tapago/tapago-api/internal/token"
 )
 
 const (
@@ -47,6 +48,14 @@ func run() error {
 		return err
 	}
 
+	// Built before the database is touched: a bad signing secret is a
+	// configuration error, and there is no reason to open a connection pool
+	// only to fail on it a moment later.
+	tokens, err := token.New(cfg.JWTSecret)
+	if err != nil {
+		return err
+	}
+
 	// Cancelled on SIGINT/SIGTERM; this is the signal to start draining.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -64,7 +73,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
-		Handler:           router.New(router.Deps{DB: pool}),
+		Handler:           router.New(router.Deps{DB: pool, Tokens: tokens}),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

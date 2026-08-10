@@ -21,13 +21,19 @@ type Config struct {
 	Port int
 	// DatabaseURL is the PostgreSQL connection string. Required.
 	DatabaseURL string
-	// JWTSecret signs and verifies access tokens. Optional at this stage;
-	// authentication handlers must validate it before use.
+	// JWTSecret signs and verifies access tokens. Required.
 	JWTSecret string
 }
 
 // ErrMissingDatabaseURL is returned when DATABASE_URL is absent or blank.
 var ErrMissingDatabaseURL = errors.New("DATABASE_URL is required but was not set")
+
+// ErrMissingJWTSecret is returned when JWT_SECRET is absent or blank.
+//
+// This is validated at startup rather than at signing time on purpose: a
+// process that boots without a secret would either mint tokens anyone can
+// forge or fail every request at runtime. Both are worse than not starting.
+var ErrMissingJWTSecret = errors.New("JWT_SECRET is required but was not set")
 
 // Load reads configuration from the process environment.
 //
@@ -37,7 +43,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Port:        DefaultPort,
 		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		JWTSecret:   os.Getenv("JWT_SECRET"),
+		JWTSecret:   strings.TrimSpace(os.Getenv("JWT_SECRET")),
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("PORT")); raw != "" {
@@ -53,6 +59,9 @@ func Load() (Config, error) {
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, ErrMissingDatabaseURL
+	}
+	if cfg.JWTSecret == "" {
+		return Config{}, ErrMissingJWTSecret
 	}
 
 	return cfg, nil

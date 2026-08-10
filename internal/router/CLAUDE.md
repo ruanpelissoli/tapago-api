@@ -17,8 +17,11 @@ The one place that maps URLs to handlers and defines the middleware chain.
 - **Handlers don't know their own paths.** Route strings live only here, so
   the full URL surface is greppable from one file.
 - **JSON 404 / 405 overrides.** chi's defaults return plain text; clients
-  parsing every response as JSON would choke on an error. All responses from
-  this API are JSON.
+  parsing every response as JSON would choke on an error.
+- **Auth is a `chi.Group`, not a global middleware.** `/health` and the two
+  `/auth/*` routes must stay reachable without a token. A global middleware
+  with an allow-list of public paths is the kind of thing that silently grows
+  a hole; a group makes the protected set explicit and additive.
 
 ## Business logic
 
@@ -26,19 +29,28 @@ The one place that maps URLs to handlers and defines the middleware chain.
   `RequestLogger` → `Recoverer`. RequestID must precede the logger for the
   id to appear in logs; Recoverer sits innermost so a panic becomes a logged
   500 instead of a dropped connection.
+- Public routes: `GET /health`, `POST /auth/register`, `POST /auth/login` —
+  the last two are how a client obtains a token, so they cannot require one.
+- Protected routes (inside `RequireAuth`): `GET /me`. Add future
+  authenticated routes to that group, not above it.
 - `GET /health` is registered without any dependency on `Deps.DB` — see
   `internal/handler/health` for why.
 
 ## Dependencies
 
-Imports `internal/handler`, `internal/handler/health`, `internal/middleware`,
-and pgx (for the `Deps.DB` type). Imported by `cmd/api`.
+Imports `internal/handler`, `internal/handler/auth`, `internal/handler/health`,
+`internal/middleware`, `internal/token`, and pgx (for the `Deps.DB` type).
+Imported by `cmd/api`.
 
 ## Gotchas
 
-- `Deps.DB` may be nil in tests. A handler that dereferences it must be
-  reachable only from routes that genuinely need the database.
+- **`Deps.Tokens` may be nil and that must stay safe.** A nil `*token.Issuer`
+  fails closed — verification rejects every token — so the route surface is
+  identical whether or not auth is configured. Do not "fix" this by skipping
+  the route registration; a route that disappears based on config is far
+  harder to debug than one that returns 401.
+- `Deps.DB` may be nil in tests. Routes that dereference it must be reachable
+  only from tests that supply one — the auth wiring tests deliberately stay on
+  paths that reject before any query runs.
 - `r.Use` panics if called after a route is registered — keep all `Use` calls
-  above the route block.
-- Feature routes should be mounted with `r.Route("/v1/...", ...)` subrouters
-  so per-feature middleware (e.g. auth) does not leak onto `/health`.
+  above the route block. Inside `r.Group`, `r.Use` applies only to that group.
