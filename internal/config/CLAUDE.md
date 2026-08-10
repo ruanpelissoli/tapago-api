@@ -8,7 +8,8 @@ needs it.
 
 ## Key decisions
 
-- **`os.Getenv` only, no config library.** The surface is three variables;
+- **`os.Getenv` only, no config library.** The surface is a handful of
+  variables;
   a library would add a dependency and indirection for no gain. Revisit only
   if we need layered files or live reload.
 - **`Load` returns an error, it does not exit.** The caller decides the
@@ -29,6 +30,14 @@ needs it.
   at signing time is deliberate: a process that boots without a secret would
   either mint tokens anyone can forge or fail every authenticated request at
   runtime, and both are worse than refusing to start.
+
+- `GOOGLE_CLIENT_IDS` / `APPLE_CLIENT_IDS` are comma-separated and
+  **optional** — a mobile app usually has one client id per platform. Blank
+  entries are dropped so an empty variable yields nil rather than a
+  configured-looking `[""]`. Left empty, the matching social route answers
+  503; the alternative (a verifier accepting any audience) would accept
+  tokens minted for someone else's app entirely. Social sign-in is optional
+  on purpose: a dev box or test stack must still boot without it.
 
 ## Dependencies
 

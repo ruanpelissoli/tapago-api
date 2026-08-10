@@ -73,11 +73,15 @@ type TokenIssuer interface {
 type Handler struct {
 	db     DB
 	tokens TokenIssuer
+	social SocialVerifiers
 }
 
 // NewHandler wires an auth handler.
-func NewHandler(db DB, tokens TokenIssuer) *Handler {
-	return &Handler{db: db, tokens: tokens}
+//
+// A zero SocialVerifiers is valid: the social routes then fail closed with a
+// 503 rather than accepting tokens nobody has configured an audience for.
+func NewHandler(db DB, tokens TokenIssuer, verifiers SocialVerifiers) *Handler {
+	return &Handler{db: db, tokens: tokens, social: verifiers}
 }
 
 type registerRequest struct {
@@ -191,7 +195,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user userResponse
-	var storedHash string
+	// A pointer, not a string: password_hash is NULL for an account created
+	// through social sign-in, and scanning that into a string errors out as
+	// a 500 instead of the 401 it should be.
+	var storedHash *string
 	err := h.db.QueryRow(r.Context(), selectUserByEmailSQL, email).
 		Scan(&user.ID, &user.Email, &user.Name, &storedHash)
 	switch {
@@ -207,7 +214,16 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := password.Verify(storedHash, req.Password); err != nil {
+	if storedHash == nil {
+		// A social-only account: there is no password to be right. Spend the
+		// same CPU a real verification would so that "this address exists but
+		// signs in with Google" is not observable from response timing.
+		password.VerifyDummy(req.Password)
+		handler.Error(w, http.StatusUnauthorized, msgBadCredentials)
+		return
+	}
+
+	if err := password.Verify(*storedHash, req.Password); err != nil {
 		if errors.Is(err, password.ErrMalformedHash) {
 			// A corrupt row, not a wrong password. The client still gets
 			// the generic answer, but this has to be visible to us.

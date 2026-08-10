@@ -29,6 +29,11 @@ type Deps struct {
 	// verification rejects every token — so the route surface stays the same
 	// whether or not auth is configured. cmd/api always supplies one.
 	Tokens *token.Issuer
+	// Social holds the Google and Apple ID-token verifiers. Either may be
+	// nil when that provider has no client id configured; the route is still
+	// mounted and answers 503, keeping the URL surface independent of the
+	// environment.
+	Social authhandler.SocialVerifiers
 }
 
 // New builds the application router with all routes and middleware attached.
@@ -52,12 +57,17 @@ func New(deps Deps) http.Handler {
 
 	r.Get("/health", health.Check)
 
-	auth := authhandler.NewHandler(deps.DB, deps.Tokens)
+	auth := authhandler.NewHandler(deps.DB, deps.Tokens, deps.Social)
 
 	// Public: these are how a client obtains a token in the first place, so
 	// they must sit outside RequireAuth.
 	r.Post("/auth/register", auth.Register)
 	r.Post("/auth/login", auth.Login)
+	// Social sign-in. The mobile SDK has already completed the OAuth flow;
+	// these take the resulting ID token and return the same {token, user}
+	// envelope as /auth/login.
+	r.Post("/auth/google", auth.Google)
+	r.Post("/auth/apple", auth.Apple)
 
 	// Protected: everything inside this group requires a valid bearer token.
 	// Using a chi.Group rather than a global middleware keeps /health and the

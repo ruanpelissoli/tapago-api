@@ -23,6 +23,14 @@ type Config struct {
 	DatabaseURL string
 	// JWTSecret signs and verifies access tokens. Required.
 	JWTSecret string
+	// GoogleClientIDs are the OAuth client ids allowed in the "aud" claim of
+	// a Google ID token — usually one per mobile platform. Optional: with
+	// none configured, POST /auth/google answers 503 instead of trusting
+	// tokens minted for some other application.
+	GoogleClientIDs []string
+	// AppleClientIDs are the Services IDs / bundle identifiers allowed in the
+	// "aud" claim of an Apple ID token. Optional, same failure mode.
+	AppleClientIDs []string
 }
 
 // ErrMissingDatabaseURL is returned when DATABASE_URL is absent or blank.
@@ -41,9 +49,11 @@ var ErrMissingJWTSecret = errors.New("JWT_SECRET is required but was not set")
 // mode; main is responsible for logging and setting the exit code.
 func Load() (Config, error) {
 	cfg := Config{
-		Port:        DefaultPort,
-		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		JWTSecret:   strings.TrimSpace(os.Getenv("JWT_SECRET")),
+		Port:            DefaultPort,
+		DatabaseURL:     strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		JWTSecret:       strings.TrimSpace(os.Getenv("JWT_SECRET")),
+		GoogleClientIDs: splitList(os.Getenv("GOOGLE_CLIENT_IDS")),
+		AppleClientIDs:  splitList(os.Getenv("APPLE_CLIENT_IDS")),
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("PORT")); raw != "" {
@@ -65,6 +75,19 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// splitList parses a comma-separated environment variable into its non-empty
+// entries. Empty input yields nil rather than a one-element slice holding "",
+// which downstream would read as a configured-but-blank client id.
+func splitList(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 // Addr returns the listen address for the HTTP server.
