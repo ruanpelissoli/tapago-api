@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 64" width="260" height="64" role="img" aria-label="tapago">
+  <title>tapago</title>
+  <defs>
+    <linearGradient id="tapago-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Icon mark: rounded square -->
+  <rect x="0" y="0" width="64" height="64" rx="16" fill="url(#tapago-grad)"/>
+
+  <!-- Letter T: horizontal bar -->
+  <rect x="14" y="17" width="36" height="7" rx="3.5" fill="white"/>
+  <!-- Letter T: vertical bar -->
+  <rect x="28.5" y="17" width="7" height="31" rx="3.5" fill="white"/>
+
+  <!-- Wordmark: tapago -->
+  <text
+    x="80"
+    y="44"
+    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+    font-size="30"
+    font-weight="700"
+    fill="#1E1B4B"
+    letter-spacing="-0.5"
+  >tapago</text>
+</svg>
