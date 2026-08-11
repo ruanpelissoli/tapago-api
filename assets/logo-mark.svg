@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="tapago icon">
+  <title>tapago icon</title>
+  <defs>
+    <linearGradient id="tapago-mark-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="0" y="0" width="64" height="64" rx="16" fill="url(#tapago-mark-grad)"/>
+
+  <!-- Letter T: horizontal bar -->
+  <rect x="14" y="17" width="36" height="7" rx="3.5" fill="white"/>
+  <!-- Letter T: vertical bar -->
+  <rect x="28.5" y="17" width="7" height="31" rx="3.5" fill="white"/>
+</svg>
