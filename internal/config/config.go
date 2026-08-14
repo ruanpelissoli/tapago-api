@@ -31,6 +31,13 @@ type Config struct {
 	// AppleClientIDs are the Services IDs / bundle identifiers allowed in the
 	// "aud" claim of an Apple ID token. Optional, same failure mode.
 	AppleClientIDs []string
+	// MercadoPagoAccessToken authenticates every call to the Mercado Pago
+	// REST API, and also selects the environment: a TEST- token talks to the
+	// sandbox, a production token to the real one. Optional, following the
+	// social client ids — a dev box or test stack must still boot without
+	// payments configured, and the payment routes answer 503 while it is
+	// empty. It is a secret: never log it or interpolate it into an error.
+	MercadoPagoAccessToken string
 }
 
 // ErrMissingDatabaseURL is returned when DATABASE_URL is absent or blank.
@@ -54,6 +61,8 @@ func Load() (Config, error) {
 		JWTSecret:       strings.TrimSpace(os.Getenv("JWT_SECRET")),
 		GoogleClientIDs: splitList(os.Getenv("GOOGLE_CLIENT_IDS")),
 		AppleClientIDs:  splitList(os.Getenv("APPLE_CLIENT_IDS")),
+
+		MercadoPagoAccessToken: strings.TrimSpace(os.Getenv("MERCADOPAGO_ACCESS_TOKEN")),
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("PORT")); raw != "" {

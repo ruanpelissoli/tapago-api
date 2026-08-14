@@ -38,6 +38,12 @@ needs it.
   503; the alternative (a verifier accepting any audience) would accept
   tokens minted for someone else's app entirely. Social sign-in is optional
   on purpose: a dev box or test stack must still boot without it.
+- `MERCADOPAGO_ACCESS_TOKEN` is trimmed and **optional**, on the same
+  reasoning. The token doubles as the environment selector — Mercado Pago
+  serves sandbox and production from one base URL and distinguishes them by
+  the credential — so there is no separate "MP environment" variable to get
+  out of step with it. Left empty, the payment routes answer 503 rather than
+  the process refusing to boot.
 
 ## Dependencies
 
@@ -45,9 +51,11 @@ Standard library only. Imported by `cmd/api`.
 
 ## Gotchas
 
-- **`Config` carries two secrets** — `DatabaseURL` and `JWTSecret`. Never log
-  a `Config` value, interpolate one into an error message, or add a `String()`
-  method to it.
+- **`Config` carries three secrets** — `DatabaseURL`, `JWTSecret` and
+  `MercadoPagoAccessToken`. Never log a `Config` value, interpolate one into
+  an error message, or add a `String()` method to it. The Mercado Pago token
+  is a live payment credential: anyone holding it can authorise charges
+  against the merchant account.
 - Tests use `t.Setenv`, which forbids `t.Parallel()` in the same test. Each
   test must set **every** required variable explicitly; inheriting one from
   the developer's shell makes the suite pass or fail depending on the machine.
