@@ -14,6 +14,7 @@ import (
 	"github.com/tapago/tapago-api/internal/config"
 	"github.com/tapago/tapago-api/internal/db"
 	authhandler "github.com/tapago/tapago-api/internal/handler/auth"
+	"github.com/tapago/tapago-api/internal/mercadopago"
 	"github.com/tapago/tapago-api/internal/router"
 	"github.com/tapago/tapago-api/internal/social"
 	"github.com/tapago/tapago-api/internal/token"
@@ -74,8 +75,13 @@ func run() error {
 	slog.Info("connected to database")
 
 	srv := &http.Server{
-		Addr:              cfg.Addr(),
-		Handler:           router.New(router.Deps{DB: pool, Tokens: tokens, Social: socialVerifiers(cfg)}),
+		Addr: cfg.Addr(),
+		Handler: router.New(router.Deps{
+			DB:          pool,
+			Tokens:      tokens,
+			Social:      socialVerifiers(cfg),
+			MercadoPago: mercadoPagoClient(cfg),
+		}),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
@@ -140,4 +146,26 @@ func socialVerifiers(cfg config.Config) authhandler.SocialVerifiers {
 	}
 
 	return verifiers
+}
+
+// mercadoPagoClient builds the payment provider client from the configured
+// access token.
+//
+// No token configured is a warning rather than a startup failure, following
+// socialVerifiers: a dev box or test stack must still boot without payments
+// wired up. The payment routes stay mounted and answer 503, so the gap shows
+// up in the logs and in the response instead of as a missing route.
+//
+// The return type is the interface and the variable is only assigned inside
+// the success branch on purpose. Returning a nil *mercadopago.Client would
+// produce a non-nil interface holding a nil pointer, the handler's `mp ==
+// nil` check would not fire, and the 503 would become a panic on the first
+// saved card.
+func mercadoPagoClient(cfg config.Config) mercadopago.MercadoPagoClient {
+	client, err := mercadopago.New(cfg.MercadoPagoAccessToken)
+	if err != nil {
+		slog.Warn("mercado pago disabled", "reason", err)
+		return nil
+	}
+	return client
 }

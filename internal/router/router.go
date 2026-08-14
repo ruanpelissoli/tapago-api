@@ -15,6 +15,8 @@ import (
 	"github.com/tapago/tapago-api/internal/handler"
 	authhandler "github.com/tapago/tapago-api/internal/handler/auth"
 	"github.com/tapago/tapago-api/internal/handler/health"
+	paymenthandler "github.com/tapago/tapago-api/internal/handler/payment"
+	"github.com/tapago/tapago-api/internal/mercadopago"
 	"github.com/tapago/tapago-api/internal/middleware"
 	"github.com/tapago/tapago-api/internal/token"
 )
@@ -34,6 +36,11 @@ type Deps struct {
 	// mounted and answers 503, keeping the URL surface independent of the
 	// environment.
 	Social authhandler.SocialVerifiers
+	// MercadoPago talks to the payment provider. It may be nil when no
+	// access token is configured; the payment routes are still mounted and
+	// answer 503, for the same reason as Social — the URL surface must not
+	// depend on the environment.
+	MercadoPago mercadopago.MercadoPagoClient
 }
 
 // New builds the application router with all routes and middleware attached.
@@ -58,6 +65,7 @@ func New(deps Deps) http.Handler {
 	r.Get("/health", health.Check)
 
 	auth := authhandler.NewHandler(deps.DB, deps.Tokens, deps.Social)
+	payments := paymenthandler.NewHandler(deps.DB, deps.MercadoPago)
 
 	// Public: these are how a client obtains a token in the first place, so
 	// they must sit outside RequireAuth.
@@ -77,6 +85,12 @@ func New(deps Deps) http.Handler {
 		r.Use(middleware.RequireAuth(deps.Tokens))
 
 		r.Get("/me", auth.Me)
+
+		// Saved cards. These are the only versioned paths in the API so far;
+		// the prefix is pinned by the acceptance criteria, and whether the
+		// older routes should move under /v1 is a separate decision.
+		r.Post("/v1/payment-methods", payments.Create)
+		r.Get("/v1/payment-methods", payments.List)
 	})
 
 	return r

@@ -67,10 +67,17 @@ the values `payment_methods.mp_customer_id` and `bets.mp_preauth_id` hold.
 
 ## Dependencies
 
-Standard library only. Imported by nothing yet; the bet flow wires it in later
-through the `MercadoPagoClient` interface, so handlers can use a fake. The
-token comes from `config.MercadoPagoAccessToken`, which is optional — no
-token, no client, so payment routes answer 503.
+Standard library only. Imported by `internal/handler/payment` — the first and
+so far only caller, which uses `CreateCustomer` when a user saves their first
+card. The bet flow wires in `CreatePreAuth` later. Both go through the
+`MercadoPagoClient` interface, so handlers can use a fake. The token comes
+from `config.MercadoPagoAccessToken`, which is optional — no token, no
+client, so payment routes answer 503.
+
+The caller's fallback for `ErrCustomerAlreadyExists` is its own
+`payment_methods.mp_customer_id`; `handler/payment` reuses that row before
+calling `CreateCustomer` at all, so the duplicate error only reaches it when
+there is nothing stored to fall back on.
 
 ## Gotchas
 

@@ -59,6 +59,33 @@ A provider with no client id configured keeps its route but answers `503`:
 without a client id there is no audience to check, and a verifier that accepts
 any audience accepts tokens minted for someone else's app.
 
+## Payment methods
+
+Both routes require a bearer token.
+
+| Route                      | Body                                       | Returns |
+| -------------------------- | ------------------------------------------ | ------- |
+| `POST /v1/payment-methods` | `{card_token, last_four, card_brand}`      | `201`   |
+| `GET /v1/payment-methods`  | —                                          | `200`   |
+
+The mobile SDK tokenises the card on the device; the API never sees a card
+number. Saving the first card creates a Mercado Pago customer for the user and
+marks the card as their default; later cards reuse that customer and are not
+default. `GET` returns `{"payment_methods": [...]}`, ordered default first then
+newest first, and `[]` — never `null` — when there are none.
+
+A response **never** contains `mp_card_token` or `mp_customer_id`: the token is
+a live credential and the customer id is provider internal. Each method is
+returned as `{id, last_four, card_brand, is_default, created_at}`.
+
+With no `MERCADOPAGO_ACCESS_TOKEN` configured the routes stay mounted and
+answer `503` rather than disappearing, so a missing token looks like a missing
+token and not like a wrong path. Mercado Pago being unreachable or rate
+limiting us is also `503` — never reported as a declined card.
+
+The table comes from `migrations/004_create_payment_methods.sql`, which must
+be applied by hand.
+
 ## Tests and checks
 
 ```bash
@@ -82,6 +109,7 @@ internal/middleware/ cross-cutting HTTP middleware (request logging)
 internal/handler/   shared JSON response helpers
   health/           GET /health liveness endpoint
   auth/             registration / login / social sign-in / me
+  payment/          saved Mercado Pago cards (create / list)
 internal/social/    Google and Apple ID token verification (JWKS)
 internal/mercadopago/ Mercado Pago REST client (customer create, card pre-auth)
 internal/model/     shared domain types and the social account upsert
