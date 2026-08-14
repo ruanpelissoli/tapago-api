@@ -27,6 +27,11 @@ config, open the database pool, build the router, serve, drain on signal.
   the latter is already cancelled, which would abort in-flight requests
   immediately rather than letting them finish.
 - Database connect is capped at 10s so an unreachable host cannot hang boot.
+- **Optional integrations warn, they do not fail startup.** `socialVerifiers`
+  and `mercadoPagoClient` leave an unconfigured provider nil and log a
+  warning: a dev box or test stack must still boot without social sign-in or
+  payments. The affected routes stay mounted and answer 503, so the gap is
+  visible in the logs and to the client rather than as a missing route.
 
 ## Dependencies
 
@@ -42,3 +47,8 @@ imports this package.
   the shutdown path returns before reading from it.
 - Server read/write timeouts are set explicitly. A zero-value `http.Server`
   has none, which is a slowloris exposure.
+- **`mercadoPagoClient` returns the interface type and only assigns inside the
+  success branch.** Returning a nil `*mercadopago.Client` would produce a
+  non-nil interface holding a nil pointer; `handler/payment`'s `mp == nil`
+  check would not fire and the 503 fallback would become a panic on the first
+  saved card. Do not "simplify" it into a single `return client, err`.
