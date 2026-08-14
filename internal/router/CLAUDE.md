@@ -33,20 +33,22 @@ The one place that maps URLs to handlers and defines the middleware chain.
   `POST /auth/google`, `POST /auth/apple` — the `/auth/*` ones are how a
   client obtains a token, so they cannot require one.
 - Protected routes (inside `RequireAuth`): `GET /me`,
-  `POST /v1/payment-methods`, `GET /v1/payment-methods`. Add future
-  authenticated routes to that group, not above it.
-- **`/v1` is currently only on the payment-method routes**, where the
+  `POST /v1/payment-methods`, `GET /v1/payment-methods`, `POST /v1/bets`.
+  Add future authenticated routes to that group, not above it.
+- **`/v1` is currently only on the payment-method and bet routes**, where the
   acceptance criteria pinned it. The rest of the surface is unversioned;
   moving it under `/v1` is a separate API-versioning decision.
+- `POST /v1/bets` is the only method mounted on `/v1/bets`; listing and
+  cancelling bets are separate, unimplemented tasks.
 - `GET /health` is registered without any dependency on `Deps.DB` — see
   `internal/handler/health` for why.
 
 ## Dependencies
 
-Imports `internal/handler`, `internal/handler/auth`, `internal/handler/health`,
-`internal/handler/payment`, `internal/mercadopago` (for the `Deps.MercadoPago`
-type), `internal/middleware`, `internal/token`, and pgx (for the `Deps.DB`
-type). Imported by `cmd/api`.
+Imports `internal/handler`, `internal/handler/auth`, `internal/handler/bet`,
+`internal/handler/health`, `internal/handler/payment`, `internal/mercadopago`
+(for the `Deps.MercadoPago` type), `internal/middleware`, `internal/token`,
+and pgx (for the `Deps.DB` type). Imported by `cmd/api`.
 
 ## Gotchas
 
@@ -59,8 +61,8 @@ type). Imported by `cmd/api`.
   with no client id configured keeps its route and answers 503. Do not gate
   route registration on configuration.
 - **`Deps.MercadoPago` may be nil**, same rule: with no access token
-  configured the payment routes stay mounted and answer 503, so the URL
-  surface never depends on the environment. `cmd/api` must return a genuinely
+  configured the payment and bet routes stay mounted and answer 503, so the
+  URL surface never depends on the environment. `cmd/api` must return a genuinely
   nil *interface* here — a nil `*mercadopago.Client` in an interface is not
   nil and would defeat the handler's fallback.
 - `Deps.DB` may be nil in tests. Routes that dereference it must be reachable
