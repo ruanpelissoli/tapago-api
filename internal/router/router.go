@@ -14,6 +14,7 @@ import (
 
 	"github.com/tapago/tapago-api/internal/handler"
 	authhandler "github.com/tapago/tapago-api/internal/handler/auth"
+	bethandler "github.com/tapago/tapago-api/internal/handler/bet"
 	"github.com/tapago/tapago-api/internal/handler/health"
 	paymenthandler "github.com/tapago/tapago-api/internal/handler/payment"
 	"github.com/tapago/tapago-api/internal/mercadopago"
@@ -66,6 +67,7 @@ func New(deps Deps) http.Handler {
 
 	auth := authhandler.NewHandler(deps.DB, deps.Tokens, deps.Social)
 	payments := paymenthandler.NewHandler(deps.DB, deps.MercadoPago)
+	bets := bethandler.NewHandler(deps.DB, deps.MercadoPago)
 
 	// Public: these are how a client obtains a token in the first place, so
 	// they must sit outside RequireAuth.
@@ -91,6 +93,10 @@ func New(deps Deps) http.Handler {
 		// older routes should move under /v1 is a separate decision.
 		r.Post("/v1/payment-methods", payments.Create)
 		r.Get("/v1/payment-methods", payments.List)
+
+		// Placing a bet. It reads a saved card and puts a hold on it, so it
+		// belongs behind the same auth as the routes above.
+		r.Post("/v1/bets", bets.Create)
 	})
 
 	return r

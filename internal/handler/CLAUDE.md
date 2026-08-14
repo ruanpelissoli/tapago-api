@@ -3,7 +3,9 @@
 ## Purpose
 
 Shared HTTP response helpers (`JSON`, `Error`) plus the subpackages holding
-the concrete handlers: `health/` (live) and `auth/` (stub).
+the concrete handlers: `health/`, `auth/` (register, login, social sign-in,
+`/me`), `payment/` (saved Mercado Pago cards) and `bet/` (placing a bet and
+holding its stake).
 
 ## Key decisions
 
@@ -25,7 +27,7 @@ the concrete handlers: `health/` (live) and `auth/` (stub).
 
 ## Dependencies
 
-Standard library only. `handler/health` imports this package for `JSON`;
+Standard library only. Every handler subpackage imports it for `JSON`/`Error`;
 `internal/router` imports it for the 404/405 responses.
 
 ## Gotchas
