@@ -4,5 +4,6 @@
 // shapes belong next to their handlers so that changing an API payload never
 // forces a change to the domain model.
 //
-// It is intentionally empty at this stage.
+// It holds the domain types — User, Bet, PaymentMethod — plus the small
+// amount of storage logic that would otherwise be duplicated across handlers.
 package model

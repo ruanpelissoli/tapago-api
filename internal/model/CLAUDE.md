@@ -25,6 +25,17 @@ today that is `UpsertSocialUser`, the account resolution shared by
 - **Provider names are duplicated as `ProviderGoogle`/`ProviderApple`** rather
   than imported from `internal/social`, keeping the dependency direction
   one-way. The values must stay in sync with `social.Provider*`.
+- **`Bet.StakeAmountBRL` is `pgtype.Numeric`.** Not `float64` (BRL settles in
+  centavos; binary floats would lose or invent them before a real charge) and
+  not a third-party decimal package (`pgtype` ships inside the already-required
+  `github.com/jackc/pgx/v5`, so it costs no new module and scans
+  `numeric(12,2)` exactly). The price is ergonomic — arithmetic goes through
+  `Int`/`Exp` or `Value`/`Scan`, not an operator — and is accepted on purpose.
+- **`Bet` and `PaymentMethod` are pure data.** No constructors, no `IsActive()`
+  helper, no re-statement of the DB CHECKs (`target_days > 0`, `stake > 0`,
+  the last-four regex). The one-active-bet rule lives in the partial unique
+  index `bets_user_id_in_flight_key`; duplicating any of it in Go just creates
+  a second place that can disagree. Behaviour arrives with its handlers.
 
 ## Business logic
 
@@ -70,5 +81,14 @@ pgx (row/error types) and the standard library. Must not import
   fails at query time, not at startup.
 - Money is `numeric` in Postgres; never model it as `float64`. Timestamps are
   `timestamptz` and UTC everywhere.
+- **`BetStatus` values must match the CHECK in `003_create_bets.sql`
+  character-for-character.** A mismatch compiles and fails at query time, on a
+  user's request. `GoalType` is the inverse trap: `goal_type` has *no* CHECK
+  yet (the taxonomy is unsettled), so the constants are advisory and the
+  database accepts any text — when the CHECK lands, write it from that list.
+- `PaymentMethod.LastFour` is a `string`, not an `int`: `"0042"` is valid and
+  would lose its leading zeros as a number. Nothing in that struct may ever
+  hold a PAN, CVV or expiry — provider ids and display metadata only, which is
+  what keeps this database out of PCI scope.
 - Never give a domain struct a `json:"-"` password field and pass it to a
   response helper — build an explicit DTO instead.
