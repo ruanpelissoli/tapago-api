@@ -1,5 +1,6 @@
-// Package bet implements the bet endpoints: today only creating one, which
-// is the operation that puts a user's money at stake.
+// Package bet implements the bet endpoints: creating one — the operation that
+// puts a user's money at stake — and reading back the caller's single
+// in-flight bet.
 //
 // # Why there is no transaction around the Mercado Pago call
 //
@@ -50,9 +51,13 @@ const (
 	msgInvalidPaymentMethod  = "payment_method_id must be a valid uuid"
 	msgPaymentMethodNotFound = "payment method not found"
 	msgBetInFlight           = "you already have a bet in progress"
-	msgCardDeclined          = "card declined"
-	msgUnauthorized          = "unauthorized"
-	msgInternal              = "internal server error"
+	// msgNoActiveBet is what GET /v1/bets/active says when the caller has no
+	// pending or active bet — including when every bet they ever placed is
+	// completed or cancelled. The app renders "place a bet" off this 404.
+	msgNoActiveBet  = "no active bet"
+	msgCardDeclined = "card declined"
+	msgUnauthorized = "unauthorized"
+	msgInternal     = "internal server error"
 	// msgProviderUnavailable is the same string handler/payment uses, so a
 	// client sees one wording for "we could not get an answer from Mercado
 	// Pago". It deliberately says nothing about the card: an outage reported
@@ -106,10 +111,11 @@ type Handler struct {
 // NewHandler wires a bet handler.
 //
 // A nil client is valid: the deployment has no MERCADOPAGO_ACCESS_TOKEN, and
-// the route stays mounted and answers 503 rather than disappearing from the
-// URL surface — the same call as handler/payment. A route that appears and
-// vanishes with the environment is far harder to debug than one that returns
-// a clear server error.
+// the routes stay mounted rather than disappearing from the URL surface — the
+// same call as handler/payment. A route that appears and vanishes with the
+// environment is far harder to debug than one that returns a clear server
+// error. Create then answers 503; Active is unaffected, because reading a bet
+// needs no provider at all.
 func NewHandler(db DB, mp mercadopago.MercadoPagoClient) *Handler {
 	return &Handler{db: db, mp: mp}
 }
@@ -164,6 +170,28 @@ const selectInFlightBetSQL = `
 SELECT 1
 FROM bets
 WHERE user_id = $1::uuid AND status IN ('pending', 'active')
+LIMIT 1`
+
+// selectActiveBetSQL reads the caller's in-flight bet.
+//
+// "In flight" is exactly the set the partial unique index
+// bets_user_id_in_flight_key covers, so at most one row can match — LIMIT 1 is
+// belt-and-braces, and ORDER BY created_at DESC only decides which row a
+// corrupted state answers with rather than erroring. 'pending' is in the set on
+// purpose: a bet stranded there by a Mercado Pago outage still occupies the
+// user's slot, so the app has to be able to see it.
+//
+// WHERE user_id = $1 *is* the authorisation check. There is no id in the path,
+// so there is nothing to leak: a caller can only ever address their own bet.
+//
+// stake_amount_brl::text from numeric(12,2) yields exactly "50.00" — the same
+// text Centavos.String() produces on the create path — so money never passes
+// through a float64 (the standing internal/model/CLAUDE.md rule).
+const selectActiveBetSQL = `
+SELECT id::text, goal_type, target_days, stake_amount_brl::text, status, created_at
+FROM bets
+WHERE user_id = $1::uuid AND status IN ('pending', 'active')
+ORDER BY created_at DESC
 LIMIT 1`
 
 // selectCardSQL loads everything the pre-auth needs in one round trip. The
@@ -322,6 +350,44 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Status:         string(model.BetStatusActive),
 		CreatedAt:      createdAt,
 	})
+}
+
+// Active returns the caller's in-flight bet, the one the mobile app reads on
+// load.
+//
+// GET /v1/bets/active -> 200 with the bet, or 404 when there is none.
+//
+// A user with only completed or cancelled bets has none in flight and gets the
+// 404, not their most recent finished bet. A user whose bet was left 'pending'
+// by a provider outage gets a 200 with status "pending" — that is the case the
+// app needs in order to render "payment pending" rather than an empty slate.
+//
+// There is deliberately no h.mp == nil guard here. The 503 in Create is
+// specific to placing a hold; this endpoint is one SELECT and touches no
+// provider, so it must answer 200/404 whether or not Mercado Pago is
+// configured. Do not "restore" the guard for symmetry.
+func (h *Handler) Active(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+
+	// Scanned straight into the response DTO: it has no mp_preauth_id field,
+	// so the provider id cannot reach a client even by accident.
+	var bet betResponse
+	err := h.db.QueryRow(r.Context(), selectActiveBetSQL, userID).
+		Scan(&bet.ID, &bet.GoalType, &bet.TargetDays, &bet.StakeAmountBRL, &bet.Status, &bet.CreatedAt)
+	switch {
+	case err == nil:
+		handler.JSON(w, http.StatusOK, bet)
+	case errors.Is(err, pgx.ErrNoRows):
+		handler.Error(w, http.StatusNotFound, msgNoActiveBet)
+	default:
+		// The driver error names tables and connection detail; only the log
+		// gets it.
+		slog.Error("active bet: select", "user_id", userID, "error", err)
+		handler.Error(w, http.StatusInternalServerError, msgInternal)
+	}
 }
 
 // checkNoBetInFlight is the fast-fail pre-check. It writes the response and

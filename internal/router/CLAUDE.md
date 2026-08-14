@@ -33,13 +33,17 @@ The one place that maps URLs to handlers and defines the middleware chain.
   `POST /auth/google`, `POST /auth/apple` — the `/auth/*` ones are how a
   client obtains a token, so they cannot require one.
 - Protected routes (inside `RequireAuth`): `GET /me`,
-  `POST /v1/payment-methods`, `GET /v1/payment-methods`, `POST /v1/bets`.
-  Add future authenticated routes to that group, not above it.
+  `POST /v1/payment-methods`, `GET /v1/payment-methods`, `POST /v1/bets`,
+  `GET /v1/bets/active`. Add future authenticated routes to that group, not
+  above it.
 - **`/v1` is currently only on the payment-method and bet routes**, where the
   acceptance criteria pinned it. The rest of the surface is unversioned;
   moving it under `/v1` is a separate API-versioning decision.
-- `POST /v1/bets` is the only method mounted on `/v1/bets`; listing and
-  cancelling bets are separate, unimplemented tasks.
+- The bet surface is two paths with one method each: `/v1/bets` takes only
+  `POST`, `/v1/bets/active` only `GET`; everything else on either is a 405.
+  They are independent static chi nodes, so neither shadows the other — the
+  `GET /v1/bets` → 405 test guards that. Bet history and cancellation are
+  separate, unimplemented tasks.
 - `GET /health` is registered without any dependency on `Deps.DB` — see
   `internal/handler/health` for why.
 

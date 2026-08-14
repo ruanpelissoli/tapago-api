@@ -97,6 +97,12 @@ func New(deps Deps) http.Handler {
 		// Placing a bet. It reads a saved card and puts a hold on it, so it
 		// belongs behind the same auth as the routes above.
 		r.Post("/v1/bets", bets.Create)
+		// Reading the caller's in-flight bet. A single resource rather than a
+		// list: the partial unique index bets_user_id_in_flight_key allows at
+		// most one pending-or-active bet per user. chi matches /v1/bets and
+		// /v1/bets/active as independent static nodes, so neither shadows the
+		// other.
+		r.Get("/v1/bets/active", bets.Active)
 	})
 
 	return r

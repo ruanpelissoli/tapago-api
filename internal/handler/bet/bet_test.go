@@ -176,6 +176,36 @@ func authed(t *testing.T, body, userID string) *http.Request {
 	return authenticated
 }
 
+// authedGet is authed's counterpart for the read endpoint: same RequireAuth
+// round trip, no body.
+func authedGet(t *testing.T, userID string) *http.Request {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/bets/active", nil)
+	if userID == "" {
+		return req
+	}
+
+	issuer, err := token.New("bet-handler-test-secret")
+	if err != nil {
+		t.Fatalf("token.New: %v", err)
+	}
+	raw, err := issuer.Issue(userID)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+raw)
+
+	var authenticated *http.Request
+	middleware.RequireAuth(issuer)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		authenticated = r
+	})).ServeHTTP(httptest.NewRecorder(), req)
+	if authenticated == nil {
+		t.Fatalf("RequireAuth rejected the test token for subject %q", userID)
+	}
+	return authenticated
+}
+
 func serve(t *testing.T, h http.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -656,6 +686,162 @@ func TestCreateAcceptsBoundaryValues(t *testing.T) {
 
 			if rec.Code != http.StatusCreated {
 				t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body)
+			}
+		})
+	}
+}
+
+// --- reading the in-flight bet -------------------------------------------
+
+// activeRow is what selectActiveBetSQL returns for a user with a bet running.
+func activeRow(status string) stubRow {
+	return stubRow{values: []any{testBetID, "exercise", 30, "50.00", status, testCreatedAt}}
+}
+
+func TestActiveReturnsInFlightBet(t *testing.T) {
+	db := &stubDB{rowAnswers: []stubRow{activeRow("active")}}
+	h := bethandler.NewHandler(db, &stubMP{})
+
+	rec := serve(t, h.Active, authedGet(t, testUserID))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	body := decode(t, rec)
+	if body["id"] != testBetID {
+		t.Errorf("id = %v, want %q", body["id"], testBetID)
+	}
+	if body["goal_type"] != "exercise" {
+		t.Errorf("goal_type = %v", body["goal_type"])
+	}
+	if body["target_days"] != float64(30) {
+		t.Errorf("target_days = %v", body["target_days"])
+	}
+	// A string, not a JSON number, for the same reason as on the create path.
+	if got, ok := body["stake_amount_brl"].(string); !ok || got != "50.00" {
+		t.Errorf("stake_amount_brl = %#v, want the string %q", body["stake_amount_brl"], "50.00")
+	}
+	if body["status"] != "active" {
+		t.Errorf("status = %v, want active", body["status"])
+	}
+	if _, ok := body["created_at"]; !ok {
+		t.Error("body has no created_at")
+	}
+	// A bare object, not wrapped, with exactly the six fields of betResponse.
+	if len(body) != 6 {
+		t.Errorf("body has %d fields, want exactly 6: %v", len(body), body)
+	}
+	assertNoSecrets(t, rec)
+
+	// One read, scoped to the caller and to the in-flight statuses.
+	if len(db.calls) != 1 {
+		t.Fatalf("database statements = %d, want 1: this endpoint is one SELECT", len(db.calls))
+	}
+	lookup := db.calls[0]
+	if !strings.Contains(lookup.sql, "user_id = $1::uuid") {
+		t.Errorf("query is not scoped to the caller: %s", lookup.sql)
+	}
+	if !strings.Contains(lookup.sql, "'pending', 'active'") {
+		t.Errorf("query does not restrict to in-flight statuses: %s", lookup.sql)
+	}
+	if !strings.Contains(lookup.sql, "stake_amount_brl::text") {
+		t.Errorf("stake is not selected as text; money must never scan into a float: %s", lookup.sql)
+	}
+	if len(lookup.args) != 1 || lookup.args[0] != testUserID {
+		t.Errorf("query args = %v, want just the caller's id", lookup.args)
+	}
+	if len(db.execs) != 0 {
+		t.Errorf("exec statements = %d, want 0: this endpoint is read-only", len(db.execs))
+	}
+}
+
+// The outage case the app needs: a bet stranded 'pending' still occupies the
+// user's slot, so it must come back rather than reading as "no bet".
+func TestActiveReturnsPendingBet(t *testing.T) {
+	db := &stubDB{rowAnswers: []stubRow{activeRow("pending")}}
+	h := bethandler.NewHandler(db, &stubMP{})
+
+	rec := serve(t, h.Active, authedGet(t, testUserID))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if got := decode(t, rec)["status"]; got != "pending" {
+		t.Errorf("status = %v, want pending", got)
+	}
+	assertNoSecrets(t, rec)
+}
+
+// No row: the user never placed a bet, or every bet they placed is completed
+// or cancelled. The status predicate makes both cases identical here.
+func TestActiveWhenNoBet(t *testing.T) {
+	db := &stubDB{rowAnswers: []stubRow{{err: pgx.ErrNoRows}}}
+	h := bethandler.NewHandler(db, &stubMP{})
+
+	rec := serve(t, h.Active, authedGet(t, testUserID))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body)
+	}
+	if got := decode(t, rec)["error"]; got != "no active bet" {
+		t.Errorf("error = %q, want %q", got, "no active bet")
+	}
+}
+
+func TestActiveReportsDatabaseFailureAsInternal(t *testing.T) {
+	db := &stubDB{rowAnswers: []stubRow{{err: errors.New("connection reset")}}}
+	h := bethandler.NewHandler(db, &stubMP{})
+
+	rec := serve(t, h.Active, authedGet(t, testUserID))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body)
+	}
+	if got := fmt.Sprint(decode(t, rec)["error"]); got != "internal server error" {
+		t.Errorf("error = %q, want the generic message", got)
+	}
+	if strings.Contains(rec.Body.String(), "connection reset") {
+		t.Errorf("body leaks the underlying failure: %s", rec.Body)
+	}
+}
+
+// Reading a bet touches no provider, so a deployment without a Mercado Pago
+// access token must still answer 200 — there is no 503 path on this route.
+func TestActiveWorksWithoutMercadoPagoClient(t *testing.T) {
+	db := &stubDB{rowAnswers: []stubRow{activeRow("active")}}
+	h := bethandler.NewHandler(db, nil)
+
+	rec := serve(t, h.Active, authedGet(t, testUserID))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestActiveRequiresAuthentication(t *testing.T) {
+	cases := map[string]string{
+		"no user id on the context": "",
+		// Must be rejected here, not by Postgres: a bad uuid cast is SQLSTATE
+		// 22P02, which would surface as a 500.
+		"non-uuid subject": "not-a-uuid",
+	}
+
+	for name, userID := range cases {
+		t.Run(name, func(t *testing.T) {
+			db := &stubDB{}
+			h := bethandler.NewHandler(db, &stubMP{})
+
+			rec := serve(t, h.Active, authedGet(t, userID))
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body)
+			}
+			if got := rec.Header().Get("WWW-Authenticate"); got != "Bearer" {
+				t.Errorf("WWW-Authenticate = %q, want %q", got, "Bearer")
+			}
+			if len(db.calls) != 0 {
+				t.Errorf("database statements = %d, want 0", len(db.calls))
 			}
 		})
 	}

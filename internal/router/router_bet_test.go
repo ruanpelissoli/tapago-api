@@ -91,13 +91,72 @@ func TestCreateBetRequiresBearerToken(t *testing.T) {
 	}
 }
 
-// Listing and cancelling bets are out of scope for this milestone, so only
-// POST is mounted on this path.
+// Bet history and cancellation are out of scope for this milestone, so only
+// POST is mounted on this path. /v1/bets/active is a separate chi node and
+// does not make GET here legal.
 func TestBetRouteRejectsWrongMethod(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(method, "/v1/bets", nil)
+
+			router.New(router.Deps{Tokens: betIssuer(t)}).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Errorf("status = %d, want %d: %s", rec.Code, http.StatusMethodNotAllowed, rec.Body)
+			}
+		})
+	}
+}
+
+// GET /v1/bets/active must be mounted *inside* RequireAuth. A 404 here would
+// mean the path is not registered at all — an unregistered path falls through
+// to the mux's NotFound without ever running the group's middleware — so this
+// one test proves both "mounted" and "protected".
+func TestActiveBetRequiresBearerToken(t *testing.T) {
+	issuer := betIssuer(t)
+
+	for name, header := range map[string]string{
+		"missing":          "",
+		"blank bearer":     "Bearer ",
+		"wrong scheme":     "Basic dXNlcjpwYXNz",
+		"not a token":      "Bearer not-a-jwt",
+		"signed elsewhere": "Bearer " + tokenFrom(t, "a-different-secret"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/v1/bets/active", nil)
+			if header != "" {
+				req.Header.Set("Authorization", header)
+			}
+
+			router.New(router.Deps{Tokens: issuer}).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body)
+			}
+			if got := rec.Header().Get("WWW-Authenticate"); got != "Bearer" {
+				t.Errorf("WWW-Authenticate = %q, want %q", got, "Bearer")
+			}
+
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body["error"] != "unauthorized" {
+				t.Errorf("error = %q, want a generic %q", body["error"], "unauthorized")
+			}
+		})
+	}
+}
+
+// Reading the in-flight bet is the only thing this path does; writing to it is
+// not a thing, so everything but GET is a 405.
+func TestActiveBetRouteRejectsWrongMethod(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(method, "/v1/bets/active", nil)
 
 			router.New(router.Deps{Tokens: betIssuer(t)}).ServeHTTP(rec, req)
 
