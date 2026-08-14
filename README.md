@@ -33,13 +33,14 @@ curl -i localhost:8080/health
 
 All configuration comes from environment variables; see `.env.example`.
 
-| Variable            | Required | Default | Purpose                                        |
-| ------------------- | -------- | ------- | ---------------------------------------------- |
-| `PORT`              | no       | `8080`  | HTTP listen port                               |
-| `DATABASE_URL`      | yes      | —       | PostgreSQL connection string                   |
-| `JWT_SECRET`        | no\*     | —       | Signs access tokens (\*required by auth)       |
-| `GOOGLE_CLIENT_IDS` | no       | —       | Comma-separated client ids for `/auth/google`  |
-| `APPLE_CLIENT_IDS`  | no       | —       | Comma-separated client ids for `/auth/apple`   |
+| Variable                   | Required | Default | Purpose                                       |
+| -------------------------- | -------- | ------- | --------------------------------------------- |
+| `PORT`                     | no       | `8080`  | HTTP listen port                              |
+| `DATABASE_URL`             | yes      | —       | PostgreSQL connection string                  |
+| `JWT_SECRET`               | no\*     | —       | Signs access tokens (\*required by auth)      |
+| `GOOGLE_CLIENT_IDS`        | no       | —       | Comma-separated client ids for `/auth/google` |
+| `APPLE_CLIENT_IDS`         | no       | —       | Comma-separated client ids for `/auth/apple`  |
+| `MERCADOPAGO_ACCESS_TOKEN` | no       | —       | Mercado Pago API token; also selects sandbox vs production |
 
 ## Authentication
 
@@ -82,6 +83,7 @@ internal/handler/   shared JSON response helpers
   health/           GET /health liveness endpoint
   auth/             registration / login / social sign-in / me
 internal/social/    Google and Apple ID token verification (JWKS)
+internal/mercadopago/ Mercado Pago REST client (customer create, card pre-auth)
 internal/model/     shared domain types and the social account upsert
 migrations/         forward-only SQL, applied by hand
 ```
