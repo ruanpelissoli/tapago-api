@@ -2,11 +2,15 @@
 
 ## Purpose
 
-`POST /v1/bets` — the endpoint that puts a user's money at stake. It
-validates the request, reserves the single in-flight bet slot, places a
-Mercado Pago pre-authorisation hold on a saved card, and settles the bet row
-on the result. It sits inside `RequireAuth` and never reads an
-`Authorization` header itself. First caller of `mercadopago.CreatePreAuth`.
+Two routes, both inside `RequireAuth`, neither reading an `Authorization`
+header itself:
+
+- `POST /v1/bets` — puts a user's money at stake. Validates the request,
+  reserves the single in-flight bet slot, places a Mercado Pago
+  pre-authorisation hold on a saved card, and settles the bet row on the
+  result. First caller of `mercadopago.CreatePreAuth`.
+- `GET /v1/bets/active` — read-only, one SELECT, no provider call, no writes.
+  Returns the caller's in-flight bet so the app can render state on load.
 
 ## Key decisions
 
@@ -30,9 +34,15 @@ on the result. It sits inside `RequireAuth` and never reads an
 - **`betResponse` has no `mp_preauth_id` field at all** — stronger than
   `json:"-"`, nothing to un-hide. Provider-internal, same call as
   `mp_customer_id` being absent from `paymentMethodResponse`.
-- **A nil `MercadoPagoClient` keeps the route mounted and answers 503**, and
-  is checked *before* any insert so no row is written for a hold that was
-  never attempted.
+- **A nil `MercadoPagoClient` keeps both routes mounted.** `Create` answers
+  503, checked *before* any insert so no row is written for a hold that was
+  never attempted. **`Active` has no such guard on purpose** — it touches no
+  provider and must answer 200/404 regardless. Do not add one for symmetry.
+- **`Active` returns a bare `betResponse`, not `{"bet": …}`.** The
+  `{"payment_methods": […]}` wrapper in `handler/payment` is for a
+  *collection* that may need pagination; the in-flight bet is a single
+  resource that cannot become a list. Reusing `betResponse` unchanged is also
+  what guarantees no `mp_preauth_id`.
 - `authenticatedUserID` / `isUUID` / `decodeJSON` are duplicated from
   `handler/payment` rather than exported from it — same trade as that package
   made against `handler/auth`.
@@ -54,6 +64,13 @@ Outcome of `CreatePreAuth` decides both the stored status and the response:
   place a **second real hold** on the same card. Blocking them until
   reconciliation is the safe side of that trade. `APIError.PaymentID` is
   logged when present — it is the only handle on that hold.
+- **`GET /v1/bets/active` = `status IN ('pending','active')`** — exactly the
+  set `bets_user_id_in_flight_key` covers, so at most one row matches and
+  `LIMIT 1` is belt-and-braces. `pending` is in the set **deliberately**: a
+  bet stranded there by an MP outage still blocks new bets, so the app must
+  be able to render "payment pending". All-`completed`/`cancelled` → 404, not
+  the last finished bet. `WHERE user_id = $1` *is* the authorisation check;
+  no id in the path means nothing to leak.
 - **One bet at a time is enforced by `bets_user_id_in_flight_key`**, the
   partial unique index. The `SELECT 1 … status IN ('pending','active')`
   pre-check is a fast-fail optimisation only: two concurrent requests both
@@ -94,5 +111,7 @@ applied by hand.
 - If the settling `UPDATE` fails after MP succeeded, the response is a 500 and
   the row is recoverable **only** from the log line carrying the bet id and
   the pre-auth id. Do not weaken that log.
-- Capturing/releasing the hold, webhooks, and bet listing/cancellation are all
-  unimplemented — a hold placed here is never released.
+- Reading the *active* bet exists; **bet history/listing, cancellation,
+  capturing/releasing the hold, webhooks, and any notion of progress
+  (days elapsed, end date) are all unimplemented** — a hold placed here is
+  never released.
