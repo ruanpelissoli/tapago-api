@@ -6,16 +6,51 @@ HTTP API for tapago, written in Go with the standard library plus
 
 ## Requirements
 
-- Go 1.25 or newer
-- A reachable PostgreSQL instance
+- Docker with Compose v2 — or, to run the binary directly, Go 1.25 or newer
+  plus a reachable PostgreSQL instance
 
-## Running locally
+## Running locally with Docker
+
+```bash
+cp .env.example .env      # then set JWT_SECRET
+docker compose up --build
+```
+
+That starts two services: `db` (PostgreSQL 17) and `api`. The API waits for
+the database to report healthy before it starts, because it exits rather than
+boot without one.
+
+`migrations/` is mounted into the database's `docker-entrypoint-initdb.d`, so
+on a **fresh** volume PostgreSQL applies `001…004` in numbered order — the
+same thing the manual `psql -f` step does. It does not run them again against
+an existing volume: after adding a migration, either apply it by hand or
+recreate the database with `docker compose down -v`, which deletes all local
+data.
+
+Useful commands:
+
+```bash
+docker compose ps                 # service status and health
+docker compose logs -f api        # follow API logs
+docker compose down               # stop, keep the data volume
+docker compose down -v            # stop and delete the data volume
+```
+
+`.env` is git-ignored and is read by compose automatically. Compose builds
+`DATABASE_URL` itself, pointing at the `db` service — the value in `.env` is
+for running the binary on the host, where the database is on `localhost`.
+`API_PORT` and `POSTGRES_PORT` change the published host ports only.
+
+## Running locally without Docker
 
 ```bash
 cp .env.example .env      # then edit DATABASE_URL / JWT_SECRET
 set -a && . ./.env && set +a
 go run ./cmd/api
 ```
+
+`docker compose up db` starts just the database if you want the API on the
+host and PostgreSQL in a container.
 
 The server refuses to start — non-zero exit, single error log line — if
 `DATABASE_URL` is unset or the database cannot be pinged. That is deliberate:
@@ -41,6 +76,11 @@ All configuration comes from environment variables; see `.env.example`.
 | `GOOGLE_CLIENT_IDS`        | no       | —       | Comma-separated client ids for `/auth/google` |
 | `APPLE_CLIENT_IDS`         | no       | —       | Comma-separated client ids for `/auth/apple`  |
 | `MERCADOPAGO_ACCESS_TOKEN` | no       | —       | Mercado Pago API token; also selects sandbox vs production |
+
+Compose-only extras — they configure the local stack, not the API process:
+`API_PORT`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`POSTGRES_DB`. The `POSTGRES_*` values are read once, when the data volume is
+first created; changing them later needs `docker compose down -v`.
 
 ## Authentication
 
