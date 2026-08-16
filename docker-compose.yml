@@ -1,0 +1,69 @@
+# Local development stack: PostgreSQL plus the API.
+#
+#   cp .env.example .env    # then set JWT_SECRET
+#   docker compose up --build
+#
+# Compose loads .env from this directory automatically, so the ${...} defaults
+# below are only the fallback when a variable is absent.
+name: tapago
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-tapago}
+    ports:
+      # Published so psql and `go run ./cmd/api` on the host can reach it.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # postgres runs every *.sql here in name order the first time the data
+      # volume is empty — which is exactly the manual `psql -f migrations/...`
+      # step, in the order the files are numbered. Files added later do NOT
+      # run against an existing volume; see README.
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # The API refuses to start if it cannot ping the database, so it must
+      # not be launched until postgres is accepting connections.
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tapago}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Fixed inside the container; API_PORT below changes the host port only.
+      PORT: 8080
+      # Built here rather than taken from .env: DATABASE_URL in .env points at
+      # localhost for running the binary on the host, and "localhost" inside
+      # this container is the container itself.
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-tapago}?sslmode=disable
+      # Required — the API exits non-zero without it. Fail here, with a
+      # readable message, rather than in a crash loop.
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (cp .env.example .env)}
+      # Optional: empty leaves the matching routes mounted, answering 503.
+      GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:-}
+      APPLE_CLIENT_IDS: ${APPLE_CLIENT_IDS:-}
+      MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

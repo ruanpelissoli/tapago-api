@@ -1,0 +1,25 @@
+# Keep the build context small and, more importantly, keep secrets out of it:
+# .env must never end up in an image layer.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.github
+
+assets
+README.md
+**/CLAUDE.md
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# Build and test artifacts
+*.exe
+*.test
+*.out
+coverage.*
+*.coverprofile

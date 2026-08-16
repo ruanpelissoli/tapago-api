@@ -57,6 +57,13 @@ compile time.
 
 - **Applying a file is a manual step.** Code merged before its migration runs
   fails with an "column does not exist" error at request time, not at startup.
+- **Except under `docker compose`**, where this directory is mounted at the
+  database's `docker-entrypoint-initdb.d`: PostgreSQL runs every `*.sql` here,
+  in name order, but **only when the data volume is empty**. So a new
+  migration reaches a colleague's existing local database only if they apply
+  it by hand or run `docker compose down -v`. The numbering is what makes the
+  order correct — do not rename a file out of sequence. Non-`.sql` files here
+  (this one) are ignored by that mechanism.
 - `ON CONFLICT (email)` in `model.UpsertSocialUser` depends on the unique
   constraint from 001. Dropping it silently turns the upsert into a duplicate
   insert.
